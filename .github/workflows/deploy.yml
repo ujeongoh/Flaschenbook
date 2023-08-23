@@ -1,0 +1,46 @@
+name: CI/CD Workflow
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      
+    - name: Set up AWS CLI
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-norteast-2
+
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin ${{ secrets.ECR_URL }}
+
+    - name: Build, Push & Deploy
+      run: |
+        # React Frontend
+        if git diff --name-only HEAD~1..HEAD | grep -q “flaschenbook-react-app/“; then
+          docker build -t ${{ secrets.ECR_URL }}/de-4-1-ecr/flaschenbook-react:latest .
+          docker push ${{ secrets.ECR_URL }}/de-4-1-ecr/flaschenbook-react:latest
+          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER_NAME }} --service flaschenbook-frontend --force-new-deployment
+        fi
+        # Spring Backend
+        if git diff --name-only HEAD~1..HEAD | grep -q “flaschenbook-spring-app/“; then
+          docker build -t ${{ secrets.ECR_URL }}/de-4-1-ecr/flaschenbook-spring:latest flaschenbook-spring-app/
+          docker push ${{ secrets.ECR_URL }}/de-4-1-ecr/flaschenbook-spring:latest
+          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER_NAME }} --service flaschenbook-backend --force-new-deployment
+        fi
+        # Airflow
+        if git diff --name-only HEAD~1..HEAD | grep -q “airflow/“; then
+          docker build -t ${{ secrets.ECR_URL }}/flaschenbookaf-dev:latest airflow/
+          docker push ${{ secrets.ECR_URL }}/flaschenbookaf-dev:latest
+          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER_NAME }} --service flaschenbookaf-dev-scheduler --force-new-deployment
+          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER_NAME }} --service flaschenbookaf-dev-workers --force-new-deployment
+          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER_NAME }} --service flaschenbookaf-dev-web-server --force-new-deployment
+          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER_NAME }} --service flaschenbookaf-dev-flower --force-new-deployment
+        fi
